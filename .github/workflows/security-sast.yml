@@ -17,6 +17,34 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Debug scanner installation
+        shell: cmd
+        run: |
+          echo ===== USER =====
+          whoami
+
+          echo ===== PATH =====
+          echo %PATH%
+
+          echo ===== SEMGREP =====
+          where semgrep || echo SEMGREP NOT FOUND
+
+          echo ===== TRIVY =====
+          where trivy || echo TRIVY NOT FOUND
+
+          echo ===== GITLEAKS =====
+          where gitleaks || echo GITLEAKS NOT FOUND
+
+          echo ===== CHECKOV =====
+          where checkov || echo CHECKOV NOT FOUND
+
+          echo ===== PYTHON =====
+          where python || echo PYTHON NOT FOUND
+          python --version || echo PYTHON FAILED
+
+          echo ===== PIP =====
+          where pip || echo PIP NOT FOUND
+
       - name: Prepare reports
         shell: cmd
         run: |
