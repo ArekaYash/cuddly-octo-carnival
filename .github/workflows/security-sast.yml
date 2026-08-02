@@ -1,0 +1,81 @@
+name: Security SAST
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  security-events: write
+
+jobs:
+  scan:
+    runs-on: self-hosted
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Prepare reports
+        shell: bash
+        run: mkdir -p reports/raw reports/sarif
+
+      - name: Semgrep
+        shell: bash
+        continue-on-error: true
+        run: |
+          semgrep scan --config auto --json --output reports/raw/semgrep.json .
+          semgrep scan --config auto --sarif --output reports/sarif/semgrep.sarif .
+
+      - name: Trivy
+        shell: bash
+        continue-on-error: true
+        run: |
+          trivy fs --scanners vuln,secret,misconfig --format json --output reports/raw/trivy.json .
+          trivy fs --scanners vuln,secret,misconfig --format sarif --output reports/sarif/trivy.sarif .
+
+      - name: Gitleaks
+        shell: bash
+        continue-on-error: true
+        run: |
+          gitleaks detect --source . --redact --report-format json --report-path reports/raw/gitleaks.json
+          gitleaks detect --source . --redact --report-format sarif --report-path reports/sarif/gitleaks.sarif
+
+      - name: Checkov
+        shell: bash
+        continue-on-error: true
+        run: |
+          checkov -d . -o json --output-file-path reports/raw/checkov.json
+          checkov -d . -o sarif --output-file-path reports/sarif/checkov.sarif
+
+      - name: Summary
+        if: always()
+        shell: bash
+        run: |
+          {
+            echo '# Security SAST Report'
+            echo
+            echo 'Download the `security-sast-report` artifact for JSON/SARIF results.'
+            echo
+            echo '| Scanner | Outputs |'
+            echo '|---|---|'
+            echo '| Semgrep | JSON, SARIF |'
+            echo '| Trivy | JSON, SARIF |'
+            echo '| Gitleaks | JSON, SARIF |'
+            echo '| Checkov | JSON, SARIF |'
+          } | tee reports/security-report.md >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload SARIF
+        if: always()
+        uses: github/codeql-action/upload-sarif@v3
+        continue-on-error: true
+        with:
+          sarif_file: reports/sarif
+
+      - name: Upload report artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: security-sast-report
+          path: reports/
