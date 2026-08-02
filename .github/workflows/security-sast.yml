@@ -18,53 +18,54 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Prepare reports
-        shell: powershell
-        run: New-Item -ItemType Directory -Force reports/raw, reports/sarif | Out-Null
+        shell: cmd
+        run: |
+          if not exist reports\raw mkdir reports\raw
+          if not exist reports\sarif mkdir reports\sarif
 
       - name: Semgrep
-        shell: powershell
+        shell: cmd
         continue-on-error: true
         run: |
-          semgrep scan --config auto --json --output reports/raw/semgrep.json .
-          semgrep scan --config auto --sarif --output reports/sarif/semgrep.sarif .
+          semgrep scan --config auto --json --output reports\raw\semgrep.json .
+          semgrep scan --config auto --sarif --output reports\sarif\semgrep.sarif .
 
       - name: Trivy
-        shell: powershell
+        shell: cmd
         continue-on-error: true
         run: |
-          trivy fs --scanners vuln,secret,misconfig --format json --output reports/raw/trivy.json .
-          trivy fs --scanners vuln,secret,misconfig --format sarif --output reports/sarif/trivy.sarif .
+          trivy fs --scanners vuln,secret,misconfig --format json --output reports\raw\trivy.json .
+          trivy fs --scanners vuln,secret,misconfig --format sarif --output reports\sarif\trivy.sarif .
 
       - name: Gitleaks
-        shell: powershell
+        shell: cmd
         continue-on-error: true
         run: |
-          gitleaks detect --source . --redact --report-format json --report-path reports/raw/gitleaks.json
-          gitleaks detect --source . --redact --report-format sarif --report-path reports/sarif/gitleaks.sarif
+          gitleaks detect --source . --redact --report-format json --report-path reports\raw\gitleaks.json
+          gitleaks detect --source . --redact --report-format sarif --report-path reports\sarif\gitleaks.sarif
 
       - name: Checkov
-        shell: powershell
+        shell: cmd
         continue-on-error: true
         run: |
-          checkov -d . -o json --output-file-path reports/raw/checkov.json
-          checkov -d . -o sarif --output-file-path reports/sarif/checkov.sarif
+          checkov -d . -o json --output-file-path reports\raw\checkov.json
+          checkov -d . -o sarif --output-file-path reports\sarif\checkov.sarif
 
       - name: Summary
         if: always()
-        shell: powershell
+        shell: cmd
         run: |
-          @'
-          # Security SAST Report
-
-          Download the `security-sast-report` artifact for JSON/SARIF results.
-
-          | Scanner | Outputs |
-          |---|---|
-          | Semgrep | JSON, SARIF |
-          | Trivy | JSON, SARIF |
-          | Gitleaks | JSON, SARIF |
-          | Checkov | JSON, SARIF |
-          '@ | Tee-Object -FilePath reports/security-report.md | Add-Content $env:GITHUB_STEP_SUMMARY
+          > reports\security-report.md echo # Security SAST Report
+          >> reports\security-report.md echo.
+          >> reports\security-report.md echo Download the security-sast-report artifact for JSON/SARIF results.
+          >> reports\security-report.md echo.
+          >> reports\security-report.md echo ^| Scanner ^| Outputs ^|
+          >> reports\security-report.md echo ^|---^|---^|
+          >> reports\security-report.md echo ^| Semgrep ^| JSON, SARIF ^|
+          >> reports\security-report.md echo ^| Trivy ^| JSON, SARIF ^|
+          >> reports\security-report.md echo ^| Gitleaks ^| JSON, SARIF ^|
+          >> reports\security-report.md echo ^| Checkov ^| JSON, SARIF ^|
+          type reports\security-report.md >> "%GITHUB_STEP_SUMMARY%"
 
       - name: Upload SARIF
         if: always()
