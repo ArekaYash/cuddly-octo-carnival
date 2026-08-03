@@ -17,33 +17,15 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Debug scanner installation
+      - name: Debug environment
         shell: cmd
         run: |
-          echo ===== USER =====
-          whoami
-
-          echo ===== PATH =====
-          echo %PATH%
-
-          echo ===== SEMGREP =====
-          where semgrep || echo SEMGREP NOT FOUND
-
-          echo ===== TRIVY =====
-          where trivy || echo TRIVY NOT FOUND
-
-          echo ===== GITLEAKS =====
-          where gitleaks || echo GITLEAKS NOT FOUND
-
-          echo ===== CHECKOV =====
-          where checkov || echo CHECKOV NOT FOUND
-
-          echo ===== PYTHON =====
-          where python || echo PYTHON NOT FOUND
-          python --version || echo PYTHON FAILED
-
-          echo ===== PIP =====
-          where pip || echo PIP NOT FOUND
+          echo USERNAME=%USERNAME%
+          echo PATH=%PATH%
+          where semgrep
+          where trivy
+          where gitleaks
+          where checkov
 
       - name: Prepare reports
         shell: cmd
@@ -55,29 +37,29 @@ jobs:
         shell: cmd
         continue-on-error: true
         run: |
-          semgrep scan --config auto --json --output reports\raw\semgrep.json .
-          semgrep scan --config auto --sarif --output reports\sarif\semgrep.sarif .
+          "C:\Users\yashm\AppData\Local\Programs\Python\Python314\Scripts\semgrep.exe" scan --config auto --json --output reports\raw\semgrep.json .
+          "C:\Users\yashm\AppData\Local\Programs\Python\Python314\Scripts\semgrep.exe" scan --config auto --sarif --output reports\sarif\semgrep.sarif .
 
       - name: Trivy
         shell: cmd
         continue-on-error: true
         run: |
-          trivy fs --scanners vuln,secret,misconfig --format json --output reports\raw\trivy.json .
-          trivy fs --scanners vuln,secret,misconfig --format sarif --output reports\sarif\trivy.sarif .
+          "C:\Users\yashm\AppData\Local\Microsoft\WinGet\Links\trivy.exe" fs --scanners vuln,secret,misconfig --format json --output reports\raw\trivy.json .
+          "C:\Users\yashm\AppData\Local\Microsoft\WinGet\Links\trivy.exe" fs --scanners vuln,secret,misconfig --format sarif --output reports\sarif\trivy.sarif .
 
       - name: Gitleaks
         shell: cmd
         continue-on-error: true
         run: |
-          gitleaks detect --source . --redact --report-format json --report-path reports\raw\gitleaks.json
-          gitleaks detect --source . --redact --report-format sarif --report-path reports\sarif\gitleaks.sarif
+          "C:\Users\yashm\OneDrive\Documents\gitleaks\gitleaks.exe" detect --source . --redact --report-format json --report-path reports\raw\gitleaks.json
+          "C:\Users\yashm\OneDrive\Documents\gitleaks\gitleaks.exe" detect --source . --redact --report-format sarif --report-path reports\sarif\gitleaks.sarif
 
       - name: Checkov
         shell: cmd
         continue-on-error: true
         run: |
-          checkov -d . -o json --output-file-path reports\raw\checkov.json
-          checkov -d . -o sarif --output-file-path reports\sarif\checkov.sarif
+          "C:\Users\yashm\AppData\Local\Programs\Python\Python314\Scripts\checkov.cmd" -d . -o json --output-file-path reports\raw\checkov.json
+          "C:\Users\yashm\AppData\Local\Programs\Python\Python314\Scripts\checkov.cmd" -d . -o sarif --output-file-path reports\sarif\checkov.sarif
 
       - name: Summary
         if: always()
