@@ -10,6 +10,10 @@ permissions:
   contents: read
   security-events: write
 
+env:
+  PYTHONUTF8: "1"
+  PYTHONIOENCODING: "utf-8"
+
 jobs:
   scan:
     runs-on: self-hosted
@@ -17,76 +21,146 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Enable UTF-8
+        shell: cmd
+        run: |
+          chcp 65001
+
       - name: Debug environment
         shell: cmd
         run: |
-          echo USERNAME=%USERNAME%
-          echo PATH=%PATH%
-          where semgrep
-          where trivy
-          where gitleaks
-          where checkov
+          echo USER=%USERNAME%
+          whoami
+          python --version
+          semgrep --version
+          trivy --version
+          gitleaks version
+          checkov --version
 
       - name: Prepare reports
         shell: cmd
         run: |
+          if not exist reports mkdir reports
           if not exist reports\raw mkdir reports\raw
           if not exist reports\sarif mkdir reports\sarif
 
-      - name: Semgrep
-        shell: cmd
-        continue-on-error: true
-        run: |
-          "C:\Users\yashm\AppData\Local\Programs\Python\Python314\Scripts\semgrep.exe" scan --config auto --json --output reports\raw\semgrep.json .
-          "C:\Users\yashm\AppData\Local\Programs\Python\Python314\Scripts\semgrep.exe" scan --config auto --sarif --output reports\sarif\semgrep.sarif .
+      ##################################################
+      # SEMGREP
+      ##################################################
 
-      - name: Trivy
+      - name: Semgrep JSON
         shell: cmd
         continue-on-error: true
         run: |
-          "C:\Users\yashm\AppData\Local\Microsoft\WinGet\Links\trivy.exe" fs --scanners vuln,secret,misconfig --format json --output reports\raw\trivy.json .
-          "C:\Users\yashm\AppData\Local\Microsoft\WinGet\Links\trivy.exe" fs --scanners vuln,secret,misconfig --format sarif --output reports\sarif\trivy.sarif .
+          semgrep scan --config auto --json --output reports\raw\semgrep.json .
 
-      - name: Gitleaks
+      - name: Semgrep SARIF
         shell: cmd
         continue-on-error: true
         run: |
-          "C:\Users\yashm\OneDrive\Documents\gitleaks\gitleaks.exe" detect --source . --redact --report-format json --report-path reports\raw\gitleaks.json
-          "C:\Users\yashm\OneDrive\Documents\gitleaks\gitleaks.exe" detect --source . --redact --report-format sarif --report-path reports\sarif\gitleaks.sarif
+          semgrep scan --config auto --sarif --output reports\sarif\semgrep.sarif .
 
-      - name: Checkov
+      ##################################################
+      # TRIVY
+      ##################################################
+
+      - name: Trivy JSON
         shell: cmd
         continue-on-error: true
         run: |
-          "C:\Users\yashm\AppData\Local\Programs\Python\Python314\Scripts\checkov.cmd" -d . -o json --output-file-path reports\raw\checkov.json
-          "C:\Users\yashm\AppData\Local\Programs\Python\Python314\Scripts\checkov.cmd" -d . -o sarif --output-file-path reports\sarif\checkov.sarif
+          trivy fs --skip-version-check --scanners vuln,secret,misconfig --format json --output reports\raw\trivy.json .
+
+      - name: Trivy SARIF
+        shell: cmd
+        continue-on-error: true
+        run: |
+          trivy fs --skip-version-check --scanners vuln,secret,misconfig --format sarif --output reports\sarif\trivy.sarif .
+
+      ##################################################
+      # GITLEAKS
+      ##################################################
+
+      - name: Gitleaks JSON
+        shell: cmd
+        continue-on-error: true
+        run: |
+          gitleaks detect --source . --redact --report-format json --report-path reports\raw\gitleaks.json
+
+      - name: Gitleaks SARIF
+        shell: cmd
+        continue-on-error: true
+        run: |
+          gitleaks detect --source . --redact --report-format sarif --report-path reports\sarif\gitleaks.sarif
+
+      ##################################################
+      # CHECKOV
+      ##################################################
+
+      - name: Checkov JSON
+        shell: cmd
+        continue-on-error: true
+        run: |
+          checkov -d . -o json --output-file-path reports\raw\checkov.json
+
+      - name: Checkov SARIF
+        shell: cmd
+        continue-on-error: true
+        run: |
+          checkov -d . -o sarif --output-file-path reports\sarif\checkov.sarif
+
+      ##################################################
+      # VERIFY OUTPUTS
+      ##################################################
+
+      - name: Verify reports
+        if: always()
+        shell: cmd
+        run: |
+          echo ===== RAW =====
+          dir reports\raw
+          echo.
+          echo ===== SARIF =====
+          dir reports\sarif
+
+      ##################################################
+      # SUMMARY
+      ##################################################
 
       - name: Summary
         if: always()
         shell: cmd
         run: |
-          > reports\security-report.md echo # Security SAST Report
-          >> reports\security-report.md echo.
-          >> reports\security-report.md echo Download the security-sast-report artifact for JSON/SARIF results.
-          >> reports\security-report.md echo.
-          >> reports\security-report.md echo ^| Scanner ^| Outputs ^|
-          >> reports\security-report.md echo ^|---^|---^|
-          >> reports\security-report.md echo ^| Semgrep ^| JSON, SARIF ^|
-          >> reports\security-report.md echo ^| Trivy ^| JSON, SARIF ^|
-          >> reports\security-report.md echo ^| Gitleaks ^| JSON, SARIF ^|
-          >> reports\security-report.md echo ^| Checkov ^| JSON, SARIF ^|
+          (
+          echo # Security Scan Report
+          echo.
+          echo ^| Scanner ^| Status ^|
+          echo ^|----------^|--------^|
+          echo ^| Semgrep ^| JSON + SARIF ^|
+          echo ^| Trivy ^| JSON + SARIF ^|
+          echo ^| Gitleaks ^| JSON + SARIF ^|
+          echo ^| Checkov ^| JSON + SARIF ^|
+          ) > reports\security-report.md
+
           type reports\security-report.md >> "%GITHUB_STEP_SUMMARY%"
+
+      ##################################################
+      # UPLOAD SARIF
+      ##################################################
 
       - name: Upload SARIF
         if: always()
-        uses: github/codeql-action/upload-sarif@v3
         continue-on-error: true
+        uses: github/codeql-action/upload-sarif@v4
         with:
           sarif_file: reports/sarif
 
-      - name: Upload report artifact
+      ##################################################
+      # UPLOAD ARTIFACTS
+      ##################################################
+
+      - name: Upload Reports
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: security-sast-report
-          path: reports/
+          path: reports
