@@ -16,10 +16,21 @@ env:
 
 jobs:
   scan:
+    name: ${{ matrix.scanner }}
     runs-on: self-hosted
+
     strategy:
+      fail-fast: false
       matrix:
-        scanner: [semgrep, trivy, gitleaks, checkov]
+        scanner:
+          - semgrep
+          - trivy
+          - gitleaks
+          - checkov
+
+    env:
+      REPORT_DIR: reports-${{ matrix.scanner }}
+
     steps:
       - uses: actions/checkout@v4
 
@@ -30,7 +41,6 @@ jobs:
       - name: Debug environment
         shell: cmd
         run: |
-          echo USER=%USERNAME%
           whoami
           python --version
           semgrep --version
@@ -38,128 +48,227 @@ jobs:
           gitleaks version
           checkov --version
 
-      - name: Prepare reports directory
-        shell: cmd
+      - name: Prepare report directories
+        shell: pwsh
         run: |
-          if not exist reports mkdir reports
-          if not exist reports\raw mkdir reports\raw
-          if not exist reports\sarif mkdir reports\sarif
-          if not exist reports\html mkdir reports\html
+          New-Item -ItemType Directory -Force `
+            "$env:REPORT_DIR/raw" `
+            "$env:REPORT_DIR/sarif" `
+            "$env:REPORT_DIR/html" | Out-Null
 
-      - name: Ensure SARIF converter is built
-        shell: cmd
+      - name: Build SARIF converter (if required)
+        shell: pwsh
         run: |
-          if not exist "C:\Users\yashm\OneDrive\Documents\sarif-converter\sarif-converter.exe" (
-            cd /d "C:\Users\yashm\OneDrive\Documents\sarif-converter"
-            go build -o sarif-converter.exe ./main
-          )
+          $converter = "C:\Users\yashm\OneDrive\Documents\sarif-converter\sarif-converter.exe"
 
-      - name: Run {{ matrix.scanner }} JSON
-        shell: cmd
+          if (!(Test-Path $converter)) {
+              Push-Location "C:\Users\yashm\OneDrive\Documents\sarif-converter"
+              go build -o sarif-converter.exe ./main
+              Pop-Location
+          }
+
+      - name: Run scanner
+        shell: pwsh
         continue-on-error: true
         run: |
-          if "{{ matrix.scanner }}" == "semgrep" (
-            semgrep scan --config auto --json --output reports\raw\semgrep.json --exclude reports/ .
-          ) else if "{{ matrix.scanner }}" == "trivy" (
-            trivy fs --skip-version-check --scanners vuln,secret,misconfig --format json --output reports\raw\trivy.json --exclude-dir reports .
-          ) else if "{{ matrix.scanner }}" == "gitleaks" (
-            gitleaks detect --source . --redact --report-format json --report-path reports\raw\gitleaks.json --exclude-regex='reports\\(.*\'
-          ) else if "{{ matrix.scanner }}" == "checkov" (
-            if not exist reports\temp mkdir reports\temp
-            checkov -d . -o json --output-file-path reports\temp\checkov
-            move /Y reports\temp\checkov\results_json.json reports\raw\checkov.json
-            rmdir /S /Q reports\temp
-          )
+          $scanner = "${{ matrix.scanner }}"
 
-      - name: Run {{ matrix.scanner }} SARIF
-        shell: cmd
+          switch ($scanner) {
+
+            "semgrep" {
+
+              semgrep scan `
+                --config auto `
+                --exclude reports `
+                --json `
+                --output "$env:REPORT_DIR/raw/semgrep.json" `
+                .
+
+              semgrep scan `
+                --config auto `
+                --exclude reports `
+                --sarif `
+                --output "$env:REPORT_DIR/sarif/semgrep.sarif" `
+                .
+
+            }
+
+            "trivy" {
+
+              trivy fs `
+                --skip-version-check `
+                --skip-dirs reports `
+                --scanners vuln,secret,misconfig `
+                --format json `
+                --output "$env:REPORT_DIR/raw/trivy.json" `
+                .
+
+              trivy fs `
+                --skip-version-check `
+                --skip-dirs reports `
+                --scanners vuln,secret,misconfig `
+                --format sarif `
+                --output "$env:REPORT_DIR/sarif/trivy.sarif" `
+                .
+
+            }
+
+            "gitleaks" {
+
+              gitleaks detect `
+                --source . `
+                --redact `
+                --report-format json `
+                --report-path "$env:REPORT_DIR/raw/gitleaks.json"
+
+              gitleaks detect `
+                --source . `
+                --redact `
+                --report-format sarif `
+                --report-path "$env:REPORT_DIR/sarif/gitleaks.sarif"
+
+            }
+
+            "checkov" {
+
+              $tmp = Join-Path $env:REPORT_DIR "temp"
+
+              New-Item -ItemType Directory -Force $tmp | Out-Null
+
+              checkov `
+                -d . `
+                --skip-path reports `
+                -o json `
+                --output-file-path $tmp
+
+              Move-Item `
+                "$tmp/results_json.json" `
+                "$env:REPORT_DIR/raw/checkov.json" `
+                -Force
+
+              checkov `
+                -d . `
+                --skip-path reports `
+                -o sarif `
+                --output-file-path $tmp
+
+              Move-Item `
+                "$tmp/results_sarif.sarif" `
+                "$env:REPORT_DIR/sarif/checkov.sarif" `
+                -Force
+
+              Remove-Item `
+                $tmp `
+                -Recurse `
+                -Force
+
+            }
+
+          }
+
+      - name: Generate HTML report
+        shell: pwsh
         continue-on-error: true
         run: |
-          if "{{ matrix.scanner }}" == "semgrep" (
-            semgrep scan --config auto --sarif --output reports\sarif\semgrep.sarif --exclude reports/ .
-          ) else if "{{ matrix.scanner }}" == "trivy" (
-            trivy fs --skip-version-check --scanners vuln,secret,misconfig --format sarif --output reports\sarif\trivy.sarif --exclude-dir reports .
-          ) else if "{{ matrix.scanner }}" == "gitleaks" (
-            gitleaks detect --source . --redact --report-format sarif --report-path reports\sarif\gitleaks.sarif --exclude-regex='reports\\(.*\'
-          ) else if "{{ matrix.scanner }}" == "checkov" (
-            if not exist reports\temp mkdir reports\temp
-            checkov -d . -o sarif --output-file-path reports\temp\checkov
-            move /Y reports\temp\checkov\results_sarif.sarif reports\sarif\checkov.sarif
-            rmdir /S /Q reports\temp
-          )
+          $sarif = Join-Path `
+            "$env:REPORT_DIR/sarif" `
+            ("${{ matrix.scanner }}.sarif")
 
-      - name: Generate HTML report for {{ matrix.scanner }}
-        shell: cmd
-        continue-on-error: true
-        run: |
-          "C:\Users\yashm\OneDrive\Documents\sarif-converter\sarif-converter.exe" --type html reports\sarif\{{ matrix.scanner }}.sarif reports\html\{{ matrix.scanner }}.html
+          $html = Join-Path `
+            "$env:REPORT_DIR/html" `
+            ("${{ matrix.scanner }}.html")
 
-      - name: Upload reports artifact for {{ matrix.scanner }}
+          if (Test-Path $sarif) {
+
+            & "C:\Users\yashm\OneDrive\Documents\sarif-converter\sarif-converter.exe" `
+              --type html `
+              $sarif `
+              $html
+
+          }
+
+      - name: Upload reports
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: reports-${{ matrix.scanner }}
-          path: reports
+          path: ${{ env.REPORT_DIR }}
 
   collect_and_upload:
     needs: scan
     runs-on: self-hosted
+
     steps:
       - uses: actions/download-artifact@v4
         with:
-          pattern: reports-
-          path: ./artifacts
+          pattern: reports-*
+          path: artifacts
 
       - name: Merge reports
-        shell: cmd
+        shell: pwsh
         run: |
-          if not exist reports mkdir reports
-          if not exist reports\raw mkdir reports\raw
-          if not exist reports\sarif mkdir reports\sarif
-          if not exist reports\html mkdir reports\html
-          for /D %%I in (artifacts\reports-*) do (
-            xcopy /E /H /Y "%%I\raw\*" "reports\raw\"
-            xcopy /E /H /Y "%%I\sarif\*" "reports\sarif\"
-            xcopy /E /H /Y "%%I\html\*" "reports\html\"
-          )
+          New-Item -ItemType Directory -Force `
+            reports/raw, `
+            reports/sarif, `
+            reports/html | Out-Null
+
+          Get-ChildItem artifacts -Directory | ForEach-Object {
+
+            if (Test-Path "$($_.FullName)/raw") {
+              Copy-Item "$($_.FullName)/raw/*" reports/raw -Recurse -Force
+            }
+
+            if (Test-Path "$($_.FullName)/sarif") {
+              Copy-Item "$($_.FullName)/sarif/*" reports/sarif -Recurse -Force
+            }
+
+            if (Test-Path "$($_.FullName)/html") {
+              Copy-Item "$($_.FullName)/html/*" reports/html -Recurse -Force
+            }
+
+          }
 
       - name: Verify reports
         if: always()
-        shell: cmd
+        shell: pwsh
         run: |
-          echo ===== RAW =====
-          dir reports\raw
-          echo.
-          echo ===== SARIF =====
-          dir reports\sarif
-          echo.
-          echo ===== HTML =====
-          dir reports\html
+          Write-Host "===== RAW ====="
+          Get-ChildItem reports/raw -Force
 
-      - name: Summary
+          Write-Host ""
+          Write-Host "===== SARIF ====="
+          Get-ChildItem reports/sarif -Force
+
+          Write-Host ""
+          Write-Host "===== HTML ====="
+          Get-ChildItem reports/html -Force
+
+      - name: Generate summary
         if: always()
-        shell: cmd
+        shell: pwsh
         run: |
-          (
-          echo # Security Scan Report
-          echo.
-          echo ^| Scanner ^| Status ^|
-          echo ^|----------^|--------^|
-          echo ^| Semgrep ^| JSON + SARIF + HTML ^|
-          echo ^| Trivy ^| JSON + SARIF + HTML ^|
-          echo ^| Gitleaks ^| JSON + SARIF + HTML ^|
-          echo ^| Checkov ^| JSON + SARIF + HTML ^|
-          ) > reports\security-report.md
+          @"
+          # Security Scan Report
 
-          type reports\security-report.md >> "%GITHUB_STEP_SUMMARY%"
+          | Scanner | Outputs |
+          |----------|---------|
+          | Semgrep | JSON, SARIF, HTML |
+          | Trivy | JSON, SARIF, HTML |
+          | Gitleaks | JSON, SARIF, HTML |
+          | Checkov | JSON, SARIF, HTML |
+          "@ | Set-Content reports/security-report.md
 
-      - name: Upload SARIF to GitHub Code Scanning
+          Get-Content reports/security-report.md |
+            Add-Content $env:GITHUB_STEP_SUMMARY
+
+      - name: Upload SARIF
         if: always()
+        continue-on-error: true
         uses: github/codeql-action/upload-sarif@v4
         with:
-          sarif_file: reports\sarif
+          sarif_file: reports/sarif
 
-      - name: Upload Reports
+      - name: Upload final reports
         if: always()
         uses: actions/upload-artifact@v4
         with:
